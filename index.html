@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Observatorio CCOMUSOC Dinámico</title>
+<title>Observatorio CCOMUSOC Interactivo</title>
 
 <!-- Fuentes -->
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
@@ -57,6 +57,14 @@ input, select, button {
   font-size: 1rem;
 }
 
+button {
+  cursor: pointer;
+  background-color: var(--color-primario);
+  color: var(--color-blanco);
+  border: none;
+  border-radius: 4px;
+}
+
 .grafico-container {
   background-color: #f8f8f8;
   padding: 1rem;
@@ -82,27 +90,60 @@ footer {
 #listaUrls li {
   margin-bottom: 0.3rem;
 }
+
+.panel-grafico {
+  margin-top: 2rem;
+}
+.panel-grafico h3 {
+  font-family: 'Anton', sans-serif;
+  color: var(--color-primario);
+  margin-bottom: 0.5rem;
+}
+.panel-grafico button {
+  margin-top: 0.5rem;
+}
 </style>
 </head>
 <body>
 
-<header>Observatorio CCOMUSOC Dinámico</header>
+<header>Observatorio CCOMUSOC Interactivo</header>
 
 <main>
   <h2>Comparar Datos de URLs</h2>
-  <input type="text" id="urlInput" placeholder="Pegar URL">
+  <input type="text" id="urlInput" placeholder="Pegar URL (hasta 50)">
   <select id="tipoDato">
     <option value="porcentaje">Porcentaje (%)</option>
     <option value="numero">Número absoluto</option>
   </select>
+  <select id="estrategia">
+    <option value="ultimo">Último número</option>
+    <option value="maximo">Máximo número</option>
+    <option value="promedio">Promedio de números</option>
+  </select>
   <button onclick="agregarURL()">Agregar URL</button>
-  <button onclick="generarGrafico()">Generar Gráfico</button>
+  <button onclick="generarGraficos()">Generar Gráficos</button>
 
   <ul id="listaUrls"></ul>
 
-  <div class="grafico-container">
-    <canvas id="graficoComparativo"></canvas>
-    <div class="fuente" id="fuentesGrafico"></div>
+  <div class="panel-grafico">
+    <h3>Gráfico de Barras</h3>
+    <canvas id="graficoBarras"></canvas>
+    <button onclick="descargarGrafico('graficoBarras')">Descargar PNG</button>
+    <div class="fuente" id="fuentesBarras"></div>
+  </div>
+
+  <div class="panel-grafico">
+    <h3>Gráfico de Torta</h3>
+    <canvas id="graficoTorta"></canvas>
+    <button onclick="descargarGrafico('graficoTorta')">Descargar PNG</button>
+    <div class="fuente" id="fuentesTorta"></div>
+  </div>
+
+  <div class="panel-grafico">
+    <h3>Gráfico de Línea</h3>
+    <canvas id="graficoLinea"></canvas>
+    <button onclick="descargarGrafico('graficoLinea')">Descargar PNG</button>
+    <div class="fuente" id="fuentesLinea"></div>
   </div>
 </main>
 
@@ -112,13 +153,16 @@ footer {
 
 <script>
 let urls = [];
+let chartBarras, chartTorta, chartLinea;
 
-// Agregar URL a la lista
+// Agregar URL
 function agregarURL() {
   const input = document.getElementById('urlInput');
   const url = input.value.trim();
-  if(url && !urls.some(u => u.url === url)){
-    urls.push({url, tipo: document.getElementById('tipoDato').value});
+  if (!url) return;
+  if (urls.length >= 50) return alert("Máximo 50 URLs");
+  if (!urls.some(u => u.url === url)) {
+    urls.push({ url, tipo: document.getElementById('tipoDato').value });
     const li = document.createElement('li');
     li.textContent = `${url} (${document.getElementById('tipoDato').value})`;
     document.getElementById('listaUrls').appendChild(li);
@@ -126,67 +170,83 @@ function agregarURL() {
   }
 }
 
-// Extrae números del texto según tipo
+// Extraer números
 function extraerNumeros(texto, tipo) {
-  let regex;
-  if(tipo === 'porcentaje'){
-    regex = /\d+(\.\d+)?\s*%/g;
-  } else {
-    regex = /\d[\d,.]*/g;
-  }
-  const matches = texto.match(regex) || [];
-  return matches.map(n => parseFloat(n.replace(/,/g, '.').replace('%','')));
+  let regex = tipo === 'porcentaje' ? /\d+(\.\d+)?\s*%/g : /\d[\d,.]*/g;
+  let matches = texto.match(regex) || [];
+  return matches.map(n => parseFloat(n.replace(/\./g,'').replace(',','.').replace('%','')));
 }
 
-// Generar gráfico comparativo
-async function generarGrafico() {
-  if(urls.length === 0) return alert('Agregá al menos una URL');
-  
-  const datasets = [];
-  const labels = [];
-  const fuentes = [];
+// Estrategia
+function calcularValor(numeros, estrategia){
+  if(numeros.length === 0) return 0;
+  if(estrategia==='ultimo') return numeros[numeros.length-1];
+  if(estrategia==='maximo') return Math.max(...numeros);
+  if(estrategia==='promedio') return numeros.reduce((a,b)=>a+b,0)/numeros.length;
+  return numeros[numeros.length-1];
+}
+
+// Descargar gráfico
+function descargarGrafico(idCanvas){
+  const canvas=document.getElementById(idCanvas);
+  const link=document.createElement('a');
+  link.download=idCanvas+'.png';
+  link.href=canvas.toDataURL();
+  link.click();
+}
+
+// Generar gráficos
+async function generarGraficos() {
+  if(urls.length===0) return alert("Agregá al menos una URL");
+
+  const estrategia=document.getElementById('estrategia').value;
+  const labels=[], valores=[], fuentes=[];
 
   for(const u of urls){
     try{
-      // Usamos tu Worker como proxy para evitar CORS
-      const res = await fetch(`https://ccomusoc-ob.sarahleeoliveraok.workers.dev/?url=${encodeURIComponent(u.url)}`);
-      const data = await res.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(data, 'text/html');
-      const texto = doc.body.innerText;
-      const numeros = extraerNumeros(texto, u.tipo);
-
-      if(numeros.length === 0) continue;
-
-      // Tomamos el último número como valor representativo
-      const valor = numeros[numeros.length - 1];
-
+      const res=await fetch(`https://ccomusoc-ob.sarahleeoliveraok.workers.dev/?url=${encodeURIComponent(u.url)}`);
+      const data=await res.text();
+      const parser=new DOMParser();
+      const doc=parser.parseFromString(data,'text/html');
+      const texto=doc.body.innerText;
+      const numeros=extraerNumeros(texto,u.tipo);
+      if(numeros.length===0) continue;
+      const valor=calcularValor(numeros,estrategia);
       labels.push(u.url);
-
-      datasets.push({
-        label: u.url,
-        data: [valor],
-        borderColor: '#' + Math.floor(Math.random()*16777215).toString(16),
-        backgroundColor: 'transparent',
-        tension: 0.3
-      });
-
+      valores.push(valor);
       fuentes.push(u.url);
     } catch(e){
-      console.error('Error leyendo URL:', u.url, e);
+      console.error('Error URL:',u.url,e);
     }
   }
 
-  const ctx = document.getElementById('graficoComparativo').getContext('2d');
-  if(window.chartInstance) window.chartInstance.destroy();
+  if(chartBarras) chartBarras.destroy();
+  if(chartTorta) chartTorta.destroy();
+  if(chartLinea) chartLinea.destroy();
 
-  window.chartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets },
-    options: { responsive: true }
+  // Barras
+  chartBarras=new Chart(document.getElementById('graficoBarras').getContext('2d'),{
+    type:'bar',
+    data:{ labels, datasets:[{label:'Comparación', data:valores, backgroundColor:labels.map(()=>'#'+Math.floor(Math.random()*16777215).toString(16))}] },
+    options:{ responsive:true, animation:{duration:1000}, plugins:{legend:{display:false}} }
   });
+  document.getElementById('fuentesBarras').textContent='Fuentes: '+fuentes.join(' | ');
 
-  document.getElementById('fuentesGrafico').textContent = 'Fuentes: ' + fuentes.join(' | ');
+  // Torta
+  chartTorta=new Chart(document.getElementById('graficoTorta').getContext('2d'),{
+    type:'pie',
+    data:{ labels, datasets:[{data:valores, backgroundColor:labels.map(()=>'#'+Math.floor(Math.random()*16777215).toString(16))}] },
+    options:{ responsive:true, animation:{duration:1000}, plugins:{legend:{position:'bottom'}} }
+  });
+  document.getElementById('fuentesTorta').textContent='Fuentes: '+fuentes.join(' | ');
+
+  // Línea
+  chartLinea=new Chart(document.getElementById('graficoLinea').getContext('2d'),{
+    type:'line',
+    data:{ labels, datasets:[{label:'Comparación', data:valores, borderColor:'#0e98d6', backgroundColor:'rgba(14,152,214,0.2)', fill:true, tension:0.3, pointBackgroundColor:'#0e98d6', pointRadius:5}] },
+    options:{ responsive:true, animation:{duration:1000}, plugins:{legend:{display:false}} }
+  });
+  document.getElementById('fuentesLinea').textContent='Fuentes: '+fuentes.join(' | ');
 }
 </script>
 
