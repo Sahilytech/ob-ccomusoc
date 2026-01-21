@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observatorio CCOMUSOC Dinámico</title>
+
+<!-- Fuentes -->
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+  --color-primario: #0e98d6;
+  --color-blanco: #ffffff;
+  --color-negro: #000000;
+  --color-rojo: #ff0000;
+  --color-amarillo: #ffcd02;
+  --color-verde: #6b8e23;
+  --color-rosa: #ffeb5;
+}
+
+body {
+  margin: 0;
+  font-family: 'Montserrat', sans-serif;
+  background-color: var(--color-blanco);
+  color: var(--color-negro);
+}
+
+header {
+  background-color: var(--color-primario);
+  color: var(--color-blanco);
+  padding: 1rem;
+  text-align: center;
+  font-family: 'Anton', sans-serif;
+  font-size: 2rem;
+}
+
+main {
+  max-width: 1200px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+h2 {
+  font-family: 'Anton', sans-serif;
+  color: var(--color-primario);
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+input, select, button {
+  padding: 0.5rem;
+  margin-right: 0.5rem;
+  font-size: 1rem;
+}
+
+.grafico-container {
+  background-color: #f8f8f8;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.fuente {
+  font-size: 0.8rem;
+  color: #555;
+  text-align: right;
+  margin-top: 0.5rem;
+}
+
+footer {
+  background-color: var(--color-negro);
+  color: var(--color-blanco);
+  padding: 1rem;
+  text-align: center;
+  margin-top: 2rem;
+}
+
+#listaUrls li {
+  margin-bottom: 0.3rem;
+}
+</style>
+</head>
+<body>
+
+<header>Observatorio CCOMUSOC Dinámico</header>
+
+<main>
+  <h2>Comparar Datos de URLs</h2>
+  <input type="text" id="urlInput" placeholder="Pegar URL">
+  <select id="tipoDato">
+    <option value="porcentaje">Porcentaje (%)</option>
+    <option value="numero">Número absoluto</option>
+  </select>
+  <button onclick="agregarURL()">Agregar URL</button>
+  <button onclick="generarGrafico()">Generar Gráfico</button>
+
+  <ul id="listaUrls"></ul>
+
+  <div class="grafico-container">
+    <canvas id="graficoComparativo"></canvas>
+    <div class="fuente" id="fuentesGrafico"></div>
+  </div>
+</main>
+
+<footer>
+  Observatorio CCOMUSOC - Datos oficiales y fuentes públicas
+</footer>
+
+<script>
+let urls = [];
+
+// Agregar URL a la lista
+function agregarURL() {
+  const input = document.getElementById('urlInput');
+  const url = input.value.trim();
+  if(url && !urls.some(u => u.url === url)){
+    urls.push({url, tipo: document.getElementById('tipoDato').value});
+    const li = document.createElement('li');
+    li.textContent = `${url} (${document.getElementById('tipoDato').value})`;
+    document.getElementById('listaUrls').appendChild(li);
+    input.value = '';
+  }
+}
+
+// Extrae números del texto según tipo
+function extraerNumeros(texto, tipo) {
+  let regex;
+  if(tipo === 'porcentaje'){
+    regex = /\d+(\.\d+)?\s*%/g;
+  } else {
+    regex = /\d[\d,.]*/g;
+  }
+  const matches = texto.match(regex) || [];
+  return matches.map(n => parseFloat(n.replace(/,/g, '.').replace('%','')));
+}
+
+// Generar gráfico comparativo
+async function generarGrafico() {
+  if(urls.length === 0) return alert('Agregá al menos una URL');
+  
+  const datasets = [];
+  const labels = [];
+  const fuentes = [];
+
+  for(const u of urls){
+    try{
+      // Usamos tu Worker como proxy para evitar CORS
+      const res = await fetch(`https://ccomusoc-ob.sarahleeoliveraok.workers.dev/?url=${encodeURIComponent(u.url)}`);
+      const data = await res.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(data, 'text/html');
+      const texto = doc.body.innerText;
+      const numeros = extraerNumeros(texto, u.tipo);
+
+      if(numeros.length === 0) continue;
+
+      // Tomamos el último número como valor representativo
+      const valor = numeros[numeros.length - 1];
+
+      labels.push(u.url);
+
+      datasets.push({
+        label: u.url,
+        data: [valor],
+        borderColor: '#' + Math.floor(Math.random()*16777215).toString(16),
+        backgroundColor: 'transparent',
+        tension: 0.3
+      });
+
+      fuentes.push(u.url);
+    } catch(e){
+      console.error('Error leyendo URL:', u.url, e);
+    }
+  }
+
+  const ctx = document.getElementById('graficoComparativo').getContext('2d');
+  if(window.chartInstance) window.chartInstance.destroy();
+
+  window.chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: { responsive: true }
+  });
+
+  document.getElementById('fuentesGrafico').textContent = 'Fuentes: ' + fuentes.join(' | ');
+}
+</script>
+
+</body>
+</html>
